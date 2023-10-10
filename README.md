@@ -1,2 +1,2 @@
-# benchmark-notebook.tmpl
-A template repository for running and analyzing benchmarks
+# Benchmarking Automatic Speech Recognition
+Notebooks for preparing and analyzing benchmarks of ASR techniques on Salad Cloud
