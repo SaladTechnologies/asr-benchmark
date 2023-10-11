@@ -167,3 +167,24 @@ async def queue_jobs(
         print(f"Sent {total} jobs in total.", flush=True, end="\r")
         print()
         return True
+
+
+def list_all_objects(s3: boto3.client, bucket: str, prefix: str = ""):
+    """List all objects in an S3 bucket."""
+    paginator = s3.get_paginator("list_objects_v2")
+    params = {"Bucket": bucket}
+
+    if prefix != "":
+        params["Prefix"] = prefix
+
+    for page in paginator.paginate(**params):
+        if "Contents" not in page:
+            continue
+        for obj in page["Contents"]:
+            yield obj
+
+
+def get_file_from_bucket(s3: boto3.client, bucket: str, key: str):
+    """Get a file from an S3 bucket."""
+    response = s3.get_object(Bucket=bucket, Key=key)
+    return response["Body"].read()
