@@ -116,7 +116,7 @@ def dict_to_html_list(dictionary: dict):
 
 
 async def send_messages(client, queue_url, messages):
-    async with Session().create_client("sqs") as client:
+    async with Session().client("sqs", region_name="us-east-2") as client:
         response = await client.send_message_batch(QueueUrl=queue_url, Entries=messages)
         return response
 
@@ -133,11 +133,27 @@ async def queue_jobs(
     batch = []
     batches = []
     total = 0
-    async with Session().create_client("sqs", region_name="us-east-2") as client:
-        queue_url = client.get_queue_url(QueueName=f"benchmark-{queue_id}")["QueueUrl"]
+    async with Session().client("sqs", region_name="us-east-2") as client:
+        try:
+            queue_url = await client.get_queue_url(
+                QueueName=f"benchmark-{queue_id}.fifo"
+            )
+        except client.exceptions.QueueDoesNotExist:
+            print(f"Queue {queue_id} does not exist. Creating it.")
+            queue_url = await client.create_queue(
+                QueueName=f"benchmark-{queue_id}.fifo",
+                Attributes={
+                    "FifoQueue": "true",
+                    "ContentBasedDeduplication": "true",
+                    "DelaySeconds": "0",
+                    "MessageRetentionPeriod": "1209600",  # 14 days
+                    "VisibilityTimeout": "30",
+                },
+            )
+        queue_url = queue_url["QueueUrl"]
         for job in jobs:
             job_id = str(uuid.uuid4())
-            job["id"] = job_id
+            # job["id"] = job_id
             batch.append(
                 {
                     "Id": job_id,
@@ -152,8 +168,8 @@ async def queue_jobs(
                 batch = []
                 if len(batches) == concurrency:
                     # wait for all the batches to finish
-                    await asyncio.gather(*batches)
-                    total += sum([len(b) for b in batches])
+                    batches = await asyncio.gather(*batches)
+                    total += sum([len(b["Successful"]) for b in batches])
                     print(f"Sent {total} jobs so far.", flush=True, end="\r")
                     batches = []
                     # wait for the delay
@@ -163,7 +179,7 @@ async def queue_jobs(
             batches.append(send_messages(client, queue_url, batch))
         # wait for the last batches to finish
         await asyncio.gather(*batches)
-        total += sum([len(b) for b in batches])
+        total += sum([len(b["Successful"]) for b in batches])
         print(f"Sent {total} jobs in total.", flush=True, end="\r")
         print()
         return True
