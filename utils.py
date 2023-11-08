@@ -9,10 +9,10 @@ from typing import Iterable, Dict
 import time
 import uuid
 import asyncio
-import aioboto3
-from aioboto3.session import Session
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 dynamodb = boto3.client("dynamodb", region_name="us-east-2")
+sqs = boto3.client("sqs", region_name="us-east-2")
 
 
 def query_dynamodb_table(benchmark_id):
@@ -113,76 +113,6 @@ def dict_to_html_list(dictionary: dict):
         + "".join([f"<li><b>{k}</b>: {v}</li>" for k, v in dictionary.items()])
         + "</ul>"
     )
-
-
-async def send_messages(client, queue_url, messages):
-    async with Session().client("sqs", region_name="us-east-2") as client:
-        response = await client.send_message_batch(QueueUrl=queue_url, Entries=messages)
-        return response
-
-
-async def queue_jobs(
-    queue_id: str, jobs: Iterable[Dict], concurrency: int = 10, delay: int = 1
-):
-    # Each job is a json-serializable dictionary that should be sent as the message body.
-    # We want to send these in batches of 10, with a configurable concurrency, and a configurable
-    # delay between each batch of batches. A concurrency of 10 means we send 10 batches of 10 jobs each
-    # before waiting for the delay. The delay is in seconds.
-    batch_size = 10
-
-    batch = []
-    batches = []
-    total = 0
-    async with Session().client("sqs", region_name="us-east-2") as client:
-        try:
-            queue_url = await client.get_queue_url(
-                QueueName=f"benchmark-{queue_id}.fifo"
-            )
-        except client.exceptions.QueueDoesNotExist:
-            print(f"Queue {queue_id} does not exist. Creating it.")
-            queue_url = await client.create_queue(
-                QueueName=f"benchmark-{queue_id}.fifo",
-                Attributes={
-                    "FifoQueue": "true",
-                    "ContentBasedDeduplication": "true",
-                    "DelaySeconds": "0",
-                    "MessageRetentionPeriod": "1209600",  # 14 days
-                    "VisibilityTimeout": "30",
-                },
-            )
-        queue_url = queue_url["QueueUrl"]
-        for job in jobs:
-            job_id = str(uuid.uuid4())
-            # job["id"] = job_id
-            batch.append(
-                {
-                    "Id": job_id,
-                    "MessageDeduplicationId": job_id,
-                    "MessageGroupId": job_id,
-                    "MessageBody": json.dumps(job),
-                }
-            )
-            if len(batch) == batch_size:
-                # asyncronously send the batch of jobs
-                batches.append(send_messages(client, queue_url, batch))
-                batch = []
-                if len(batches) == concurrency:
-                    # wait for all the batches to finish
-                    batches = await asyncio.gather(*batches)
-                    total += sum([len(b["Successful"]) for b in batches])
-                    print(f"Sent {total} jobs so far.", flush=True, end="\r")
-                    batches = []
-                    # wait for the delay
-                    await asyncio.sleep(delay)
-        # send the last batch
-        if len(batch) > 0:
-            batches.append(send_messages(client, queue_url, batch))
-        # wait for the last batches to finish
-        await asyncio.gather(*batches)
-        total += sum([len(b["Successful"]) for b in batches])
-        print(f"Sent {total} jobs in total.", flush=True, end="\r")
-        print()
-        return True
 
 
 def list_all_objects(s3: boto3.client, bucket: str, prefix: str = ""):
