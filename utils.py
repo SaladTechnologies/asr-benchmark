@@ -42,10 +42,7 @@ def get_rows_for_pd(benchmark_id):
     for item in query_dynamodb_table(benchmark_id):
         timestamp = item["timestamp"]["N"]
         data = json.loads(item["data"]["S"])
-        system = data["system_info"]
-        del data["system_info"]
-
-        row = {**data, **system, "timestamp": timestamp}
+        row = {**data, "timestamp": timestamp}
         yield row
 
 
