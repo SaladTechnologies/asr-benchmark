@@ -1,0 +1,13 @@
+setuptools
+IPython
+ipywidgets
+boto3
+ipykernel
+requests
+pandas
+plotly
+tabulate
+kaleido
+urllib3
+nbformat
+Pillow
